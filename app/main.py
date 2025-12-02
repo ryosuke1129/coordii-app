@@ -9,14 +9,14 @@ from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.conditions import Key
 
-# 初期化
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-dynamodb = boto3.resource('dynamodb')
-s3_client = boto3.client('s3')
-cloth_table = dynamodb.Table(os.environ.get('TABLE_CLOTH'))
-weather_table = dynamodb.Table(os.environ.get('TABLE_WEATHER'))
-coordinate_table = dynamodb.Table(os.environ.get('TABLE_COORDINATE'))
-user_table = dynamodb.Table(os.environ.get('TABLE_USER'))
+# 初期化print("DEBUG: Global scope started")
+client = None
+dynamodb = None
+s3_client = None
+cloth_table = None
+weather_table = None
+coordinate_table = None
+user_table = None
 BUCKET_NAME = os.environ.get('BUCKET_NAME')
 WEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
@@ -44,8 +44,39 @@ def sign_s3_url(image_url):
         print(f"Failed to sign URL: {e}")
         return image_url
 
+def initialize_resources():
+    global client, dynamodb, s3_client, cloth_table, weather_table, coordinate_table, user_table
+    
+    # すでに初期化済みなら何もしない
+    if client and dynamodb: return
+
+    print("DEBUG: Initializing resources...")
+    try:
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        dynamodb = boto3.resource('dynamodb')
+        s3_client = boto3.client('s3')
+        
+        # テーブル名が環境変数にない場合のエラーハンドリング
+        if not os.environ.get('TABLE_CLOTH'):
+            raise Exception("Environment variable TABLE_CLOTH is missing")
+            
+        cloth_table = dynamodb.Table(os.environ.get('TABLE_CLOTH'))
+        weather_table = dynamodb.Table(os.environ.get('TABLE_WEATHER'))
+        coordinate_table = dynamodb.Table(os.environ.get('TABLE_COORDINATE'))
+        user_table = dynamodb.Table(os.environ.get('TABLE_USER'))
+        print("DEBUG: Resources initialized successfully.")
+    except Exception as e:
+        print(f"CRITICAL: Resource initialization failed: {e}")
+        raise e
+
 # --- Handler ---
 def handler(event, context):
+    print(f"DEBUG: Handler started. Path: {event.get('path')}")
+    # ★修正: ここで初期化を実行 (try-catchで守られる)
+    try:
+        initialize_resources()
+    except Exception as e:
+        return {"statusCode": 500, "headers": {}, "body": json.dumps({"message": "Init Error", "error": str(e)})}
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type",
@@ -475,6 +506,7 @@ def get_current_season(date_str):
     return '冬'
 
 def create_coordinate(event, headers):
+    print("DEBUG [create_coordinate]: Start")
     try:
         body = json.loads(event['body'])
         user_id = body.get('userId')
@@ -496,6 +528,7 @@ def create_coordinate(event, headers):
         current_weekday_str = weekdays_map[weekday_index]
 
         # --- ユーザー情報 & 曜日設定取得 ---
+        print("DEBUG [create_coordinate]: Fetching User...")
         user_resp = user_table.query(KeyConditionExpression=Key('userId').eq(user_id), ScanIndexForward=False, Limit=1)
         weekly_style = ""
         user_attributes = ""
@@ -510,19 +543,24 @@ def create_coordinate(event, headers):
             u_gender = user_data.get('gender', '不明')
             u_height = user_data.get('height', '不明')
             user_attributes = f"【着用者属性】性別: {u_gender}, 身長: {u_height}cm"
+            print(f"DEBUG [create_coordinate]: User Fetched. Style: {weekly_style}")
 
         # --- 天気取得 ---
+        print("DEBUG [create_coordinate]: Fetching Weather...")
         weather_resp = weather_table.query(KeyConditionExpression=Key('userId').eq(user_id), ScanIndexForward=False, Limit=1)
         if not weather_resp['Items'] or weather_resp['Items'][0].get('targetDate') != target_date_str:
              return {"statusCode": 404, "headers": headers, "body": json.dumps({"message": "Weather data for target date not found."})}
         weather_data = weather_resp['Items'][0]
+        print("DEBUG [create_coordinate]: Weather Fetched.")
 
         # --- 服データ全件取得 ---
+        print("DEBUG [create_coordinate]: Fetching Clothes...")
         cloth_resp = cloth_table.query(KeyConditionExpression=Key('userId').eq(user_id))
         all_clothes = cloth_resp['Items']
         if not all_clothes: return {"statusCode": 400, "headers": headers, "body": json.dumps({"message": "No clothes registered."})}
         
         cloth_map = {int(c['clothId']): c['imageUrl'] for c in all_clothes}
+        print(f"DEBUG [create_coordinate]: Clothes Fetched. Count: {len(all_clothes)}")
         
         # --- アンカー（固定アイテム）の特定 ---
         anchor_cloth_info = ""
@@ -533,11 +571,11 @@ def create_coordinate(event, headers):
                 anchor_category = anchor_item.get('category')
                 anchor_cloth_info = f"""
                 【必須固定アイテム】
-                ユーザーはこの服を着たいと指定しています。必ずコーデに含めてください。
-                ID: {anchor_cloth_id}
-                カテゴリ: {anchor_category}
-                色: {anchor_item.get('color')}
-                特徴: {anchor_item.get('description')}
+                この服は必ずコーデに含めてください。
+                id: {anchor_cloth_id}
+                category: {anchor_category}
+                color: {anchor_item.get('color')}
+                desc: {anchor_item.get('description')}
                 """
 
         # --- フィルタリング ---
@@ -574,6 +612,7 @@ def create_coordinate(event, headers):
                 "desc": c.get('description', '')
             })
 
+        print(f"DEBUG [create_coordinate]: Filtered Count: {len(closet_summary)}")
         style_instruction = f"本日のテーマ設定: '{weekly_style}'" if weekly_style else "TPOを考慮しておしゃれにしてください。"
 
         # ★追加: user_attributes をプロンプトに挿入
@@ -581,13 +620,12 @@ def create_coordinate(event, headers):
         あなたはプロのスタイリストです。以下の条件でコーディネートを1つ提案してください。
 
         【ターゲット情報】
-        日付: {target_date_str} ({current_weekday_str}曜日) ({current_season})
+        日付: {target_date_str} ({current_season})
         天気: {weather_data['weather']}
         最高気温: {weather_data['max']}°C
         最低気温: {weather_data['min']}°C
         湿度: {weather_data['humidity']}%
         降水確率: {weather_data.get('pop', 0)}%
-        風: {weather_data.get('windDirection', '')} {weather_data.get('windSpeed', 0)}m/s
         {style_instruction}
 
         {user_attributes}
@@ -613,9 +651,14 @@ def create_coordinate(event, headers):
         }}
         """
         
-        response = client.chat.completions.create(model="gpt-5-nano", messages=[{"role": "user", "content": prompt}], response_format={"type": "json_object"})
+        print("DEBUG [create_coordinate]: Calling OpenAI API...")
+        start_time = time.time()
+        response = client.chat.completions.create(model="gpt-5-mini", messages=[{"role": "user", "content": prompt}], response_format={"type": "json_object"})
         ai_result = json.loads(response.choices[0].message.content)
+        end_time = time.time()
+        print(f"DEBUG [create_coordinate]: OpenAI Responded in {end_time - start_time} seconds.")
 
+        print("DEBUG [create_coordinate]: Saving to DB...")
         item = {
             'userId': user_id,
             'createDatetime': now_jst.strftime('%Y-%m-%dT%H:%M:%S'),
@@ -630,6 +673,7 @@ def create_coordinate(event, headers):
         }
         clean_item = {k: v for k, v in item.items() if v is not None}
         coordinate_table.put_item(Item=clean_item)
+        print("DEBUG [create_coordinate]: Saved.")
         
         response_data = clean_item.copy()
         
@@ -651,6 +695,7 @@ def create_coordinate(event, headers):
                 if int(tid) in cloth_map:
                     url = cloth_map.get(int(tid))
                     response_data['tops_images'].append(sign_s3_url(url))
+        print("DEBUG [create_coordinate]: Finished.")
 
         return {"statusCode": 200, "headers": headers, "body": json.dumps(response_data, default=str, ensure_ascii=False)}
 

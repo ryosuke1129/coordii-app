@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Coordii Backend Infrastructure
+Parameters:
+  OpenAIKey:
+    Type: String
+    Description: OpenAI API Key
+    NoEcho: true
+  WeatherKey:
+    Type: String
+    Description: OpenWeatherMap API Key
+    NoEcho: true
+  GoogleKey:
+    Type: String
+    Description: Google Maps API Key
+    NoEcho: true
+Globals:
+  Function:
+    Timeout: 120
+    Runtime: python3.12
+    MemorySize: 1769
+    Environment:
+      Variables:
+        TABLE_USER:
+          Ref: UserTable
+        TABLE_CLOTH:
+          Ref: ClothTable
+        TABLE_COORDINATE:
+          Ref: CoordinateTable
+        TABLE_WEATHER:
+          Ref: WeatherTable
+        BUCKET_NAME:
+          Ref: ImageBucket
+        OPENAI_API_KEY:
+          Ref: OpenAIKey
+        OPENWEATHER_API_KEY:
+          Ref: WeatherKey
+        GOOGLE_API_KEY:
+          Ref: GoogleKey
+Resources:
+  CoordiiApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: CoordiiApiFunction
+      Handler: main.handler
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: UserTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: ClothTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: CoordinateTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: WeatherTable
+      - S3CrudPolicy:
+          BucketName:
+            Ref: ImageBucket
+    Metadata:
+      SamResourceId: CoordiiApiFunction
+  UserTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: userId
+        AttributeType: S
+      - AttributeName: createDatetime
+        AttributeType: S
+      KeySchema:
+      - AttributeName: userId
+        KeyType: HASH
+      - AttributeName: createDatetime
+        KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+  ClothTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: userId
+        AttributeType: S
+      - AttributeName: clothId
+        AttributeType: N
+      KeySchema:
+      - AttributeName: userId
+        KeyType: HASH
+      - AttributeName: clothId
+        KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+  CoordinateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: userId
+        AttributeType: S
+      - AttributeName: createDatetime
+        AttributeType: S
+      KeySchema:
+      - AttributeName: userId
+        KeyType: HASH
+      - AttributeName: createDatetime
+        KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+  WeatherTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: userId
+        AttributeType: S
+      - AttributeName: createDatetime
+        AttributeType: S
+      KeySchema:
+      - AttributeName: userId
+        KeyType: HASH
+      - AttributeName: createDatetime
+        KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+  ImageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders:
+          - '*'
+          AllowedMethods:
+          - GET
+          - PUT
+          - POST
+          - HEAD
+          AllowedOrigins:
+          - '*'
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value:
+      Fn::Sub: https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/

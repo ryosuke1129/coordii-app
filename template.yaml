@@ -1,20 +1,17 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Coordii Backend Infrastructure
+Description: Coordii MVP3
 
+# パラメータ定義
 Parameters:
   OpenAIKey:
     Type: String
-    Description: OpenAI API Key
-    NoEcho: true
   WeatherKey:
     Type: String
-    Description: OpenWeatherMap API Key
-    NoEcho: true
   GoogleKey:
     Type: String
-    Description: Google Maps API Key
-    NoEcho: true
+  GoogleGenAIKey:
+    Type: String
 
 Globals:
   Function:
@@ -31,9 +28,9 @@ Globals:
         OPENAI_API_KEY: !Ref OpenAIKey
         OPENWEATHER_API_KEY: !Ref WeatherKey
         GOOGLE_API_KEY: !Ref GoogleKey
+        GOOGLE_GENAI_KEY: !Ref GoogleGenAIKey
 
 Resources:
-  # --- API Gateway + Lambda ---
   CoordiiApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -56,23 +53,25 @@ Resources:
             TableName: !Ref WeatherTable
         - S3CrudPolicy:
             BucketName: !Ref ImageBucket
+        - Statement:
+            - Sid: AllowLambdaSelfInvocation
+              Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
 
-  # --- DynamoDB Definitions ---
-  
-  # ★修正: UserTableにソートキーを追加
   UserTable:
     Type: AWS::DynamoDB::Table
     Properties:
       AttributeDefinitions:
         - AttributeName: userId
           AttributeType: S
-        - AttributeName: createDatetime  # 追加
-          AttributeType: S               # 追加
+        - AttributeName: createDatetime
+          AttributeType: S
       KeySchema:
         - AttributeName: userId
           KeyType: HASH
-        - AttributeName: createDatetime  # 追加 (これで履歴を持てるようになります)
-          KeyType: RANGE                 # 追加
+        - AttributeName: createDatetime
+          KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
 
   ClothTable:
@@ -120,7 +119,6 @@ Resources:
           KeyType: RANGE
       BillingMode: PAY_PER_REQUEST
 
-  # --- S3 Bucket ---
   ImageBucket:
     Type: AWS::S3::Bucket
     Properties:

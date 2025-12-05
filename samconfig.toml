@@ -4,8 +4,10 @@ version = 0.1
 stack_name = "coordii-app"
 resolve_s3 = true
 s3_prefix = "coordii-app"
+region = "ap-northeast-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
+parameter_overrides = "OtherParam=value"
 image_repositories = []
 
 [default.global.parameters]

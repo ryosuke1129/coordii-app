@@ -39,7 +39,7 @@ AWS Serverless Application Model (SAM) を使用したサーバーレスアー�
 ```mermaid
 graph TD
     Client[Mobile App] --> API[API Gateway]
-    API --> Lambda[AWS Lambda (main.py)]
+    API --> Lambda["AWS Lambda (main.py)"]
     
     subgraph Services
     Lambda --> UserService
